@@ -1,0 +1,279 @@
+R_LIBS_SITE="C:\\Program Files\\RStudio"
+library(pacman)
+library(dplyr)
+p_load(ggthemes, car,ggplot2, readstata13,readxl,corrplot,tidyverse,
+       stargazer,tidyr,lfe,plyr, 
+       dplyr,viridis,
+       formattable,data.table,tabulator,xlsx,
+       rgdal,broom,sf, sp, shapefiles,
+       colourvalues,RColorBrewer,rgeos, maptools)
+
+rm (list=ls ())
+setwd(" ... ")
+
+aver <- read.xlsx("asistencia veracruz.xlsx", sheetIndex = 1) %>% 
+  dplyr::mutate(estado = "veracruz")
+ayuc <- read.xlsx("asistencia yucatan.xlsx", sheetIndex =1)%>% 
+  dplyr::mutate(estado = "yucatan")
+agjto <- read.xlsx("asistencia guanajuato.xlsx", sheetIndex = 1)%>% 
+  dplyr::mutate(estado = "guanajuato")
+aqtro <- read.xlsx("asistencia queretaro.xlsx", sheetIndex = 1)%>% 
+  dplyr::mutate(estado = "queretaro")
+anl <- read.xlsx("asistencia nl.xlsx", sheetIndex = 1)%>% 
+  dplyr::mutate(estado = "nl")
+
+
+#revisar maximo de asistencias
+max(aver$asistencia, na.rm = TRUE) #13
+max(ayuc$asistencia, na.rm = TRUE) #13
+max(agjto$asistencia, na.rm = TRUE) #13
+max(aqtro$asistencia, na.rm = TRUE) #10
+max(anl$asistencia, na.rm = TRUE) #13
+
+#revisar n por estado
+
+nrow(aver)
+nrow(ayuc)
+nrow(agjto)
+nrow(aqtro)
+nrow(anl)
+
+# CHECAR NAs DE CURP
+table(is.na(agjto$curp))
+
+# o
+agjto <- agjto%>% 
+  dplyr::mutate(cuenta_curp = nchar(curp))
+table(agjto$cuenta_curp)
+
+
+#cargar entregas y base unesco
+
+avance <- read.xlsx("avance por usuario.xlsx", sheetIndex = 1)
+unesco <- read.xlsx("/Users/danielab/Documents/VIA EDUCACION/Figuras de acompañamiento/Bases merge/FdA_Base de datos UNESCO_participantes 20230816.xlsx",sheetIndex = 1)
+
+#agregar transformacion de variable a sexo (por CURP)
+
+
+# crear base de asistencias
+aver<- aver %>% 
+  select(apellido1,apellido2, nombre, correo, curp, cct, rol, asistencia,sexo, estado)
+ayuc<- ayuc %>% 
+  select(apellido1,apellido2, nombre, correo, curp, cct, rol, asistencia,sexo, estado)
+agjto<- agjto %>% 
+  select(apellido1,apellido2, nombre, correo, curp, cct, rol, asistencia,sexo, estado)
+aqtro<- aqtro %>%
+  select(apellido1,apellido2, nombre, correo, curp, cct, rol, asistencia,sexo, estado)
+anl<- anl %>%
+  select(apellido1,apellido2, nombre, correo, curp, cct, rol, asistencia,sexo, estado)
+
+asistencias <- rbind(aver,ayuc,agjto, aqtro,anl)
+nrow(asistencias) # 1537 vs 1514 en el excel vs 1444 en unesco
+nrow(unesco)
+
+
+# buscar errores en curp en BASE ASISTENCIAS
+curp_asistencias <- asistencias%>% 
+  dplyr::mutate(cuenta_curp = nchar(curp))
+
+table(curp_asistencias$cuenta_curp)
+
+
+
+#merge entre asistencias y entregas y participaciones
+bf <- left_join(avance, asistencias, by = "curp")
+
+# bf <- na.omit(bf)
+# x <-count(bf2$curp)
+
+bf <- bf %>%
+  drop_na(estado)
+count(bf$curp)
+
+
+bf %>% 
+  dplyr::group_by(curp) %>% 
+  dplyr::summarise(registros=n()) %>% 
+  arrange(desc(registros))%>% 
+  ungroup() # no duplicados?
+
+
+bf <- bf %>% 
+  add_column(  ##obteniendo por cada fila la cantidad de NA que hay 
+    bf %>% 
+      summarise(cantidad_nas = rowSums(is.na(.))) 
+  ) %>% 
+  group_by(curp) %>%  ##agrupo por combinaciones de direcci?n IP y nombre
+  filter(cantidad_nas == min(cantidad_nas)) %>% ##de los registros duplicados me quedo con los que tienen menos NA
+  distinct(curp, .keep_all = T)%>% 
+  ungroup()
+##verificando registros repetidos por correo
+
+bf %>% 
+  dplyr::group_by(curp) %>% 
+  dplyr::summarise(registros=n()) %>% 
+  arrange(desc(registros))%>% 
+  ungroup()
+
+# figuras por estado evaluadas
+count(bf$estado)
+nrow(bf) # total 
+
+# MERGE ENTRE asistencias y unesco
+unesco<- unesco %>%
+  select(NOMBRE,CURP, ESTADO, POSICIÓN, CCT.DE.ESCUELA)
+
+# Revision de curps
+curp_unesco <- unesco%>% 
+  dplyr::mutate(cuenta_curp = nchar(CURP), 
+                letrascurp= substr(CURP, 1, 4),
+                fechacurp= substr(CURP,5,10))
+
+is.character(curp_unesco$letrascurp)
+is.numeric(curp_unesco$fechacurp)
+
+curp_unesco <- curp_unesco%>% 
+  dplyr::mutate(fecha_2 = ifelse(fechacurp >0, 1, 0))
+
+table(curp_unesco$fecha_2)
+names(unesco) 
+
+unesco <- unesco %>%
+  rename_with(tolower) #a minusculas
+
+#merge entre unesco y asistencias
+une_asistencias <- left_join(unesco, asistencias, by = "curp")
+
+#drop nas
+une_asistencias <- une_asistencias %>%
+  drop_na(estado.x) #no duplicar
+count(une_asistencias$curp)
+
+
+une_asistencias %>% 
+  dplyr::group_by(curp) %>% 
+  dplyr::summarise(registros=n()) %>% 
+  arrange(desc(registros))%>% 
+  ungroup() # no duplicados? si hay 
+une_asistencias <- une_asistencias %>% 
+  add_column(  ##obteniendo por cada fila la cantidad de NA que hay 
+    une_asistencias %>% 
+      summarise(cantidad_nas = rowSums(is.na(.))) 
+  ) %>% 
+  group_by(curp) %>%  ##agrupo por combinaciones de direcci?n IP y nombre
+  filter(cantidad_nas == min(cantidad_nas)) %>% ##de los registros duplicados me quedo con los que tienen menos NA
+  distinct(curp, .keep_all = T)%>% 
+  ungroup()
+
+#merge entre unesco y asistencias
+#une_asistencias <- left_join(unesco, asistencias, by = "curp")
+
+#merge entre unesco y entregas
+une_entregas <- left_join(unesco, avance, by = "curp")
+
+
+#merge entre unesco, asistencias y entregas
+unesco_total <- left_join(une_asistencias, asistencias, by = "curp")
+
+#perfil sociodemografico
+
+# ROL
+
+# ajustar a ATP, Supervisor, Director
+# bf2 <- bf %>% mutate( rol2 = if("Dir" %in% bf$rol) { "Director"
+#  })
+
+bf$rol2 <- ifelse(bf$rol %like% "D","Director",
+                  ifelse( bf$rol %like% "S", "Supervisor",
+                          ifelse(bf$rol %like% "A", "Asistente Tecnico", "Otro")))
+
+count(groupby(bf$rol2)
+
+#agg_df <- aggregate(df$state, by=list(df$department,df$state), FUN=length)
+
+# SEXO
+
+tbl <- table(bf$sexo)
+prop.table(tbl) #porcentajes
+
+# ESCUELAS POR ZONAS POR ESTADO
+#me falta aqui identificador
+
+t_escuelas <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    a0 = count(cct)
+  )
+
+bf$id_ctt <-str_sub(bf$CCT, 3, 3)
+
+table( bf$estado, bf$id_ctt)  # está mal
+
+count(bf$cct)
+
+# ANALISIS
+#análisis foros
+
+bf$Foro0 <- ifelse(bf$foro0 == 0, 0, ifelse(bf$foro0 == 1, .5, 1))
+bf$Foro1 <- ifelse(bf$foro1 == 0, 0, ifelse(bf$foro1 == 1, .5, 1))
+bf$Foro2 <- ifelse(bf$foro2 == 0, 0, ifelse(bf$foro2 == 1, .5, 1))
+bf$Foro3 <- ifelse(bf$foro3 == 0, 0, ifelse(bf$foro3 == 1, .5, 1))
+bf$Foro4 <- ifelse(bf$foro4 == 0, 0, ifelse(bf$foro4 == 1, .5, 1))
+bf$Foro21 <- ifelse(bf$foro21 == 0, 0, ifelse(bf$foro21 == 1, .5, 1))
+bf$Foro22 <- ifelse(bf$foro22 == 0, 0, ifelse(bf$foro22 == 1, .5, 1))
+bf$Foro23 <- ifelse(bf$foro23 == 0, 0, ifelse(bf$foro23 == 1, .5, 1))
+bf$Foro24 <- ifelse(bf$foro24 == 0, 0, ifelse(bf$foro24 == 1, .5, 1))
+bf$Foro25 <- ifelse(bf$foro25 == 0, 0, ifelse(bf$foro25 == 1, .5, 1))
+bf$Foro31 <- ifelse(bf$foro31 == 0, 0, ifelse(bf$foro31 == 1, .5, 1))
+bf$Foro32 <- ifelse(bf$foro32 == 0, 0, ifelse(bf$foro32 == 1, .5, 1))
+
+bf$Foro <- (bf$Foro0+bf$Foro1+bf$Foro2+bf$Foro3+bf$Foro4+
+              bf$Foro21+bf$Foro22+bf$Foro23+bf$Foro24+bf$Foro25
+            +bf$Foro31+bf$Foro32)
+
+
+y <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    f0 = count(Foro < 1.5), # cambie a 0
+    f1 = count(Foro >= 1.5))
+ 
+
+table(bf)
+    #& Foro <= 3),
+    #f2 = count(Foro > 3 & Foro <= 5),
+    #f3 = count(Foro > 5 & Foro <= 7),
+    #f4 = count(Foro > 7 & Foro <= 9),
+    #f5 = count(Foro > 9 & Foro <= 11),
+    #f6 = count(Foro > 11)
+  )
+y
+
+
+#análisis bitácora
+
+bitacoras <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    b0 = count(bitacora_total == 0),
+    b1 = count(bitacora_total == 1),
+    b2 = count(bitacora_total == 2)
+  )
+
+bitacoras
+
+
+homas <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    h0 = count(Homa_total == 0),
+    h1 = count(Homa_total == 1),
+    h2 = count(Homa_total == 2),
+    h3 = count(Homa_total == 3)
+  )
+
+homas
+
+
+write.xlsx(bf, file = "avance por usuario - total.xlsx", sheetName = "Sheet1", 
+           col.names = TRUE, row.names = TRUE, append = FALSE)
