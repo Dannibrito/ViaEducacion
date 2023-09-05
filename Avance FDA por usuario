@@ -1,0 +1,171 @@
+R_LIBS_SITE="C:\\Program Files\\RStudio"
+library(pacman)
+p_load(ggthemes, car,ggplot2, readstata13,readxl,corrplot,tidyverse,
+       stargazer,tidyr,lfe,plyr, 
+       dplyr,viridis,
+       formattable,data.table,tabulator,xlsx,
+       rgdal,broom,sf, sp, shapefiles,
+       colourvalues,RColorBrewer,rgeos, maptools)
+
+rm (list=ls ())
+setwd("...")
+
+aver <- read.xlsx("asistencia veracruz.xlsx", sheetIndex = 1) %>% 
+  dplyr::mutate(estado = "veracruz")
+ayuc <- read.xlsx("asistencia yucatan.xlsx", sheetIndex =1)%>% 
+  dplyr::mutate(estado = "yucatan")
+agjto <- read.xlsx("asistencia guanajuato.xlsx", sheetIndex = 1)%>% 
+  dplyr::mutate(estado = "guanajuato")
+aqtro <- read.xlsx("asistencia queretaro.xlsx", sheetIndex = 1)%>% 
+  dplyr::mutate(estado = "queretaro")
+anl <- read.xlsx("asistencia nl.xlsx", sheetIndex = 1)%>% 
+  dplyr::mutate(estado = "nl")
+
+
+
+avance <- read.xlsx("avance por usuario.xlsx", sheetIndex = 1)
+
+
+aver<- aver %>% 
+  select(apellido1,apellido2, nombre, correo, curp, cct,  asistencia,estado)
+ayuc<- ayuc %>% 
+  select(apellido1,apellido2, nombre, correo, curp, cct,  asistencia,estado)
+agjto<- agjto %>% 
+  select(apellido1,apellido2, nombre, correo, curp, cct,  asistencia,estado)
+aqtro<- aqtro %>%
+  select(apellido1,apellido2, nombre, correo, curp, cct,  asistencia,estado)
+anl<- anl %>%
+  select(apellido1,apellido2, nombre, correo, curp, cct,  asistencia,estado)
+
+##creando base asistencias con todos los estados
+
+asistencias <- rbind(aver,ayuc,agjto, aqtro,anl)
+
+#select max por estado
+
+#merge entre asistencias y entregas y participaciones
+bf <- left_join(avance, asistencias, by = "curp")
+
+# bf <- na.omit(bf)
+# x <-count(bf2$curp)
+
+bf <- bf %>%
+  drop_na(estado)
+count(bf$curp)
+
+
+bf %>% 
+  dplyr::group_by(curp) %>% 
+  dplyr::summarise(registros=n()) %>% 
+  arrange(desc(registros))%>% 
+  ungroup() # no duplicados?
+
+bf <- bf %>% 
+  add_column(  ##obteniendo por cada fila la cantidad de NA que hay 
+    bf %>% 
+      summarise(cantidad_nas = rowSums(is.na(.))) 
+  ) %>% 
+  group_by(curp) %>%  ##agrupo por combinaciones de direcci?n IP y nombre
+  filter(cantidad_nas == min(cantidad_nas)) %>% ##de los registros duplicados me quedo con los que tienen menos NA
+  distinct(curp, .keep_all = T)%>% 
+  ungroup()
+
+##verificando registros repetidos por correo
+
+bf %>% 
+  dplyr::group_by(curp) %>% 
+  dplyr::summarise(registros=n()) %>% 
+  arrange(desc(registros))%>% 
+  ungroup()
+
+# figuras por estado evaluadas
+count(bf$estado)
+
+# análisis asistencias
+## este lo haria diferente
+
+t_asistencia <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    a0 = count(asistencia ==0),
+    a1 = count(asistencia == 1| asistencia == 2|asistencia == 3),
+    a2 = count(asistencia == 4| asistencia == 5|asistencia == 6),
+    a3 = count(asistencia == 7| asistencia == 8|asistencia == 9),
+    a4 = count(asistencia == 10| asistencia == 11|asistencia == 12)
+  )
+
+t_asistencia
+
+#agregar analisis que estados estan por arriba del 50% de asistencia?
+
+
+#análisis foros
+
+bf$Foro0 <- ifelse(bf$foro0 == 0, 0, ifelse(bf$foro0 == 1, .5, 1))
+bf$Foro1 <- ifelse(bf$foro1 == 0, 0, ifelse(bf$foro1 == 1, .5, 1))
+bf$Foro2 <- ifelse(bf$foro2 == 0, 0, ifelse(bf$foro2 == 1, .5, 1))
+bf$Foro3 <- ifelse(bf$foro3 == 0, 0, ifelse(bf$foro3 == 1, .5, 1))
+bf$Foro4 <- ifelse(bf$foro4 == 0, 0, ifelse(bf$foro4 == 1, .5, 1))
+bf$Foro21 <- ifelse(bf$foro21 == 0, 0, ifelse(bf$foro21 == 1, .5, 1))
+bf$Foro22 <- ifelse(bf$foro22 == 0, 0, ifelse(bf$foro22 == 1, .5, 1))
+bf$Foro23 <- ifelse(bf$foro23 == 0, 0, ifelse(bf$foro23 == 1, .5, 1))
+bf$Foro24 <- ifelse(bf$foro24 == 0, 0, ifelse(bf$foro24 == 1, .5, 1))
+bf$Foro25 <- ifelse(bf$foro25 == 0, 0, ifelse(bf$foro25 == 1, .5, 1))
+bf$Foro31 <- ifelse(bf$foro31 == 0, 0, ifelse(bf$foro31 == 1, .5, 1))
+bf$Foro32 <- ifelse(bf$foro32 == 0, 0, ifelse(bf$foro32 == 1, .5, 1))
+
+bf$Foro <- (bf$Foro0+bf$Foro1+bf$Foro2+bf$Foro3+bf$Foro4+
+              bf$Foro21+bf$Foro22+bf$Foro23+bf$Foro24+bf$Foro25
+              +bf$Foro31+bf$Foro32)
+
+
+y <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    f0 = count(Foro <= 1),
+    f1 = count(Foro > 1 & Foro <= 3),
+    f2 = count(Foro > 3 & Foro <= 5),
+    f3 = count(Foro > 5 & Foro <= 7),
+    f4 = count(Foro > 7 & Foro <= 9),
+    f5 = count(Foro > 9 & Foro <= 11),
+    f6 = count(Foro > 11)
+  )
+y
+
+#análisis bitácora
+
+z <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    b0 = count(bitacora_total == 0),
+    b1 = count(bitacora_total == 1),
+    b2 = count(bitacora_total == 2)
+  )
+z
+
+## avance general 
+
+bf$avance_num <- (bf$Foro + bf$bitacora_total+ bf$asistencia)
+bf$avance <- ((bf$avance_num/26)*100)
+
+a <- bf %>% 
+  group_by(estado) %>% 
+  dplyr::summarise(
+    a0 = count(avance <= 10),
+    a1 = count(avance > 10 & avance <= 20),
+    a2 = count(avance > 20 & avance <= 30),
+    a3 = count(avance > 30 & avance <= 40),
+    a4 = count(avance > 40 & avance <= 50),
+    a5 = count(avance > 50 & avance <= 60),
+    a6 = count(avance > 60 & avance <= 70),
+    a7 = count(avance > 70 & avance <= 80),
+    a8 = count(avance > 80 & avance <= 90),
+    a9 = count(avance > 90))
+view(a)
+
+
+write.xlsx(bf, file = "avance por usuario por estado.xlsx", sheetName = "Sheet1", 
+                    col.names = TRUE, row.names = TRUE, append = FALSE)
+
+write.xlsx(asistencias, file = "asistencias estados.xlsx", sheetName = "Sheet1", 
+           col.names = TRUE, row.names = TRUE, append = FALSE)
